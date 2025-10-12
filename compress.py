@@ -7,7 +7,7 @@ def get_file_size(filepath):
     """Get file size in bytes"""
     return os.path.getsize(filepath)
 
-def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_size_kb=200, target_size_kb=None, remove_exif=True):
+def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_size_kb=200, target_size_kb=None, remove_exif=True, verbose=True):
     """
     Compress and resize an image with maximum optimization.
     Maintains original filename and format.
@@ -25,8 +25,9 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         original_size = get_file_size(image_path)
         original_size_kb = original_size / 1024
         
-        print(f"\nProcessing: {image_path}")
-        print(f"Original size: {original_size_kb:.2f} KB")
+        if verbose:
+            print(f"\nProcessing: {image_path}")
+            print(f"Original size: {original_size_kb:.2f} KB")
         
         # Check if file is readable
         if not os.access(image_path, os.R_OK):
@@ -39,7 +40,8 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         
         # Get current dimensions
         width, height = img.size
-        print(f"Dimensions: {width}x{height}")
+        if verbose:
+            print(f"Dimensions: {width}x{height}")
         
         # Determine if we need to process this image
         needs_resize = width > max_size or height > max_size
@@ -48,7 +50,8 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         # If target size is specified, always process if current size exceeds target
         if target_size_kb and original_size_kb > target_size_kb:
             needs_compression = True
-            print(f"Target size: {target_size_kb}KB (will compress aggressively)")
+            if verbose:
+                print(f"Target size: {target_size_kb}KB (will compress aggressively)")
         
         if not needs_resize and not needs_compression:
             print(f"Skipped: Dimensions ≤{max_size}px and file size ≤{max_file_size_kb}KB")
@@ -65,9 +68,11 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
             
             # Resize with high-quality resampling
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            print(f"Resized from {width}x{height} to {new_width}x{new_height}")
+            if verbose:
+                print(f"Resized from {width}x{height} to {new_width}x{new_height}")
         else:
-            print(f"No resize needed (dimensions OK), but will compress due to file size > {max_file_size_kb}KB")
+            if verbose:
+                print(f"No resize needed (dimensions OK), but will compress due to file size > {max_file_size_kb}KB")
         
         # Convert RGBA to RGB (remove alpha channel) for better compression
         if img.mode in ('RGBA', 'LA', 'P'):
@@ -77,10 +82,12 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
                 img = img.convert('RGBA')
             background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
             img = background
-            print("Converted to RGB (removed transparency)")
+            if verbose:
+                print("Converted to RGB (removed transparency)")
         elif img.mode != 'RGB' and original_format in ['JPEG', 'JPG']:
             img = img.convert('RGB')
-            print(f"Converted {img.mode} to RGB")
+            if verbose:
+                print(f"Converted {img.mode} to RGB")
         
         # Prepare save parameters based on original format
         save_kwargs = {'optimize': True}
@@ -90,13 +97,16 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         if target_size_kb and original_size_kb > target_size_kb:
             # Start with lower quality if we need aggressive compression
             current_quality = min(quality, 75)
-            print(f"Using aggressive compression (starting quality: {current_quality})")
+            if verbose:
+                print(f"Using aggressive compression (starting quality: {current_quality})")
         
         # Save with original format and filename
         if original_format in ['JPEG', 'JPG']:
             # For JPEG, we can iteratively compress to target size
             attempt = 0
             max_attempts = 8
+            # Track final quality
+            final_quality = current_quality
             
             while attempt < max_attempts:
                 save_kwargs = {
@@ -111,20 +121,22 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
                     exif = img.info.get('exif')
                     if exif:
                         save_kwargs['exif'] = exif
-                elif attempt == 0:
+                elif attempt == 0 and verbose:
                     print("Removing EXIF metadata")
                 
                 img.save(image_path, 'JPEG', **save_kwargs)
                 
                 # Check if we reached target
                 current_size_kb = get_file_size(image_path) / 1024
+                final_quality = current_quality
                 
                 if target_size_kb is None:
                     # No target, just compress once
                     break
                     
                 if current_size_kb <= target_size_kb:
-                    print(f"✓ Reached target size after {attempt + 1} attempt(s) with quality {current_quality}")
+                    if verbose:
+                        print(f"✓ Reached target size after {attempt + 1} attempt(s) with quality {current_quality}")
                     break
                     
                 # Not reached target, reduce quality for next attempt
@@ -133,15 +145,18 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
                     # Reduce quality more aggressively as we go
                     quality_reduction = 8 if current_size_kb > target_size_kb * 1.5 else 5
                     current_quality = max(current_quality - quality_reduction, 40)  # Don't go below 40
-                    print(f"  Attempt {attempt}: {current_size_kb:.1f}KB > {target_size_kb}KB, reducing quality to {current_quality}")
+                    if verbose:
+                        print(f"  Attempt {attempt}: {current_size_kb:.1f}KB > {target_size_kb}KB, reducing quality to {current_quality}")
             
             if attempt >= max_attempts and target_size_kb:
-                print(f"⚠ Could not reach target of {target_size_kb}KB (final: {current_size_kb:.1f}KB, quality: {current_quality})")
+                if verbose:
+                    print(f"⚠ Could not reach target of {target_size_kb}KB (final: {current_size_kb:.1f}KB, quality: {current_quality})")
             
         elif original_format == 'PNG':
             # For PNG with target size, consider converting to JPEG if no transparency
             if target_size_kb and img.mode in ['RGB', 'L']:
-                print(f"Note: PNG detected. For aggressive compression (<{target_size_kb}KB), consider JPEG format")
+                if verbose:
+                    print(f"Note: PNG detected. For aggressive compression (<{target_size_kb}KB), consider JPEG format")
             
             # Save as PNG with max compression
             save_kwargs['compress_level'] = 9
@@ -174,9 +189,17 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         new_size_kb = new_size / 1024
         compression_ratio = ((original_size - new_size) / original_size) * 100
         
-        print(f"New size: {new_size_kb:.2f} KB")
-        print(f"Saved: {(original_size - new_size) / 1024:.2f} KB ({compression_ratio:.1f}% reduction)")
-        print(f"Successfully processed: {image_path}")
+        if verbose:
+            print(f"New size: {new_size_kb:.2f} KB")
+            print(f"Saved: {(original_size - new_size) / 1024:.2f} KB ({compression_ratio:.1f}% reduction)")
+            print(f"Successfully processed: {image_path}")
+        else:
+            # One-line summary output
+            target_info = f" | target {target_size_kb}KB" if target_size_kb else ""
+            target_mark = "✓" if (target_size_kb and new_size_kb <= target_size_kb) else ("✗" if target_size_kb else "")
+            dims_info = f" | {width}x{height} -> {img.size[0]}x{img.size[1]}" if (width != img.size[0] or height != img.size[1]) else f" | {width}x{height}"
+            quality_info = f" | q{final_quality}" if original_format in ['JPEG','JPG'] else f" | q{quality}"
+            print(f"✓ {os.path.basename(image_path)}{dims_info}{target_info} {target_mark} | {original_size_kb:.1f}KB -> {new_size_kb:.1f}KB (-{compression_ratio:.1f}%)")
         
         return 'compressed', compression_ratio
         
@@ -186,7 +209,7 @@ def compress_and_resize_image(image_path, max_size=720, quality=85, max_file_siz
         traceback.print_exc()
         return 'error', 0
 
-def process_directory_recursive(directory_path, max_size=720, quality=85, max_file_size_kb=200, remove_exif=True):
+def process_directory_recursive(directory_path, max_size=720, quality=85, max_file_size_kb=200, target_size_kb=None, remove_exif=True, summary=False):
     """
     Process all images in a directory and its subdirectories recursively.
     
@@ -218,6 +241,8 @@ def process_directory_recursive(directory_path, max_size=720, quality=85, max_fi
     print(f"Directory: {directory_path}")
     print(f"Max dimension: {max_size}px")
     print(f"Max file size: {max_file_size_kb}KB")
+    if target_size_kb:
+        print(f"Target file size: {target_size_kb}KB")
     print(f"Quality: {quality}")
     print(f"Remove EXIF: {remove_exif}")
     print(f"Note: Original filenames and formats will be preserved")
@@ -237,7 +262,13 @@ def process_directory_recursive(directory_path, max_size=720, quality=85, max_fi
                 
                 try:
                     result, compression = compress_and_resize_image(
-                        file_path, max_size, quality, max_file_size_kb, remove_exif
+                        file_path,
+                        max_size=max_size,
+                        quality=quality,
+                        max_file_size_kb=max_file_size_kb,
+                        target_size_kb=target_size_kb,
+                        remove_exif=remove_exif,
+                        verbose=not summary,
                     )
                     
                     if result == 'compressed':
@@ -282,11 +313,13 @@ def main():
 Examples:
   python script.py --path /path/to/images
   python script.py --path /path/to/images --quality 75 --size 1080 --maxsize 300
-  python script.py --path /path/to/images --quality 80 --maxsize 150
+  python script.py --path /path/to/images --quality 80 --maxsize 150 --target 60 --summary
   
 The script will:
   - Resize images with dimensions > max_size (default 720px)
   - Compress images with file size > max_file_size (default 200KB)
+  - Aggressively compress to reach target size if --target is set
+  - Use --summary for one-line output per file
   - Keep original filename and format
   - Remove EXIF metadata by default
             """
@@ -298,6 +331,10 @@ The script will:
                           help='Maximum dimension in pixels (default: 720)')
         parser.add_argument('--maxsize', type=int, default=200,
                           help='Maximum file size in KB (default: 200, will compress if exceeds)')
+        parser.add_argument('--target', type=int, default=None,
+                          help='Target file size in KB (aggressively compress to reach this)')
+        parser.add_argument('--summary', action='store_true',
+                          help='Tampilkan ringkasan satu baris per file (kurangi log verbose)')
         parser.add_argument('--path', type=str, 
                           help='Path to the folder containing images')
         parser.add_argument('--keep-exif', dest='remove_exif', action='store_false',
@@ -321,7 +358,9 @@ The script will:
             args.size, 
             args.quality,
             args.maxsize,
-            args.remove_exif
+            args.target,
+            args.remove_exif,
+            args.summary
         )
         
     except KeyboardInterrupt:
